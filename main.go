@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"time"
 	"zookeeper"
 )
@@ -11,5 +12,9 @@ func main() {
 		Servers:        []string{"localhost:32181"},
 		SessionTimeout: time.Minute,
 	}
-	fmt.Println(zookeeper.GetBootstrapServers(zookeeperConf))
+	bootstrapServers, err := zookeeper.GetBootstrapServers(zookeeperConf)
+	if err != nil {
+		os.Exit(1)
+	}
+	fmt.Println(bootstrapServers)
 }

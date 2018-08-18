@@ -15,8 +15,9 @@ type Zookeeper struct {
 func GetBootstrapServers(zookeeper Zookeeper) ([]string, error) {
 	c, _, err := zk.Connect(zookeeper.Servers, zookeeper.SessionTimeout)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
+	defer c.Close()
 
 	bootstrapServers, _, err := c.Children("/brokers/ids")
 	if err != nil {
