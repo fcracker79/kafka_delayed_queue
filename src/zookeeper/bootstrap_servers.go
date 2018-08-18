@@ -7,11 +7,6 @@ import (
 	"time"
 )
 
-type Zookeeper struct {
-	Servers        []string
-	SessionTimeout time.Duration
-}
-
 func GetBootstrapServers(zookeeper Zookeeper) ([]string, error) {
 	c, _, err := zk.Connect(zookeeper.Servers, zookeeper.SessionTimeout)
 	if err != nil {
