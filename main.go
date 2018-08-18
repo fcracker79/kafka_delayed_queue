@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"time"
 	"zookeeper"
 )
@@ -12,9 +11,17 @@ func main() {
 		Servers:        []string{"localhost:32181"},
 		SessionTimeout: time.Minute,
 	}
-	bootstrapServers, err := zookeeper.GetBootstrapServers(zookeeperConf)
-	if err != nil {
-		os.Exit(1)
+	zookeeperServersChannel := zookeeper.CreateBootstrapServersChannel(zookeeperConf)
+	for {
+		select {
+		case zookeeperServers := <-zookeeperServersChannel:
+			fmt.Println("Kafka servers:", zookeeperServers)
+		case t := <-time.After(time.Second * 10):
+			fmt.Println("Timeout at", t)
+		}
 	}
-	fmt.Println(bootstrapServers)
+	// bootstrapServers, err := zookeeper.GetBootstrapServers(zookeeperConf)
+	// if err != nil {
+	// 	os.Exit(1)
+	// }
 }

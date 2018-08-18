@@ -40,3 +40,39 @@ func GetBootstrapServers(zookeeper Zookeeper) ([]string, error) {
 	}
 	return result, nil
 }
+
+func equal(a, b []string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == nil {
+		return true
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if v != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func CreateBootstrapServersChannel(zookeeper Zookeeper) chan []string {
+	channel := make(chan []string)
+	go func() {
+		var bootstrapServers []string
+		for {
+			currentBootstrapServers, err := GetBootstrapServers(zookeeper)
+			if err == nil {
+				if !equal(bootstrapServers, currentBootstrapServers) {
+					bootstrapServers = currentBootstrapServers
+					channel <- currentBootstrapServers
+				}
+			}
+			time.Sleep(time.Second * 30)
+		}
+	}()
+	return channel
+}
