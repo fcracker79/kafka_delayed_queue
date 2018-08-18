@@ -13,6 +13,12 @@ func main() {
 		SessionTimeout: time.Minute,
 	}
 	zookeeperServersChannel := zookeeper.CreateBootstrapServersChannel(zookeeperConf)
+	topicsChannel := zookeeper.CreateChannelListTopics(
+		zookeeperConf,
+		func(topic string) bool {
+			return topic[0] != '_'
+		})
+
 	for {
 		select {
 		case kafkaServers := <-zookeeperServersChannel:
@@ -21,10 +27,8 @@ func main() {
 			config.Admin.Timeout = time.Second * 30
 			config.Version = sarama.V1_0_0_0
 			fmt.Println("Kafka servers:", kafkaServers)
-			topics, err := zookeeper.ListTopics(zookeeperConf, func(topic string) bool {
-				return true
-			})
-			fmt.Println("Topics result:", err, topics)
+		case topics := <-topicsChannel:
+			fmt.Println("Topics result:", topics)
 		case t := <-time.After(time.Second * 10):
 			fmt.Println("Timeout at", t)
 		}
