@@ -11,9 +11,35 @@ import (
 	"time"
 )
 
-func consume(topics []string, master sarama.Consumer, commandsChannel chan int) (chan *sarama.ConsumerMessage, chan *sarama.ConsumerError) {
+type CommandType int
+
+const (
+	STOP CommandType = iota
+	RELOAD_TOPICS
+	RELOAD_KAFKA_CONFIG
+)
+
+type Command struct {
+	CommandType CommandType
+	Data        interface{}
+}
+
+type ReloadTopicsData struct {
+	topics   []string
+	consumer *sarama.Consumer
+}
+
+type ReloadKafkaConfigData struct {
+	kafkaServers []string
+	topics       []string
+	kafkaConfig  *sarama.Config
+}
+
+func consume(topics []string, master sarama.Consumer) (chan *sarama.ConsumerMessage, chan Command, chan *sarama.ConsumerError) {
 	consumers := make(chan *sarama.ConsumerMessage)
 	errors := make(chan *sarama.ConsumerError)
+	subCommandsChannels := make([]chan Command, 1)
+	commandChannel := make(chan Command)
 
 	go func() {
 		for {
@@ -29,7 +55,9 @@ func consume(topics []string, master sarama.Consumer, commandsChannel chan int) 
 						panic(err)
 					}
 					fmt.Println(" Start consuming topic ", topic)
-					go func(topic string, consumer sarama.PartitionConsumer) {
+					curCommandChannel := make(chan Command)
+					subCommandsChannels = append(subCommandsChannels, curCommandChannel)
+					go func(topic string, consumer sarama.PartitionConsumer, commandsChannel chan Command) {
 						for {
 							select {
 							case consumerError := <-consumer.Errors():
@@ -38,35 +66,50 @@ func consume(topics []string, master sarama.Consumer, commandsChannel chan int) 
 							case msg := <-consumer.Messages():
 								consumers <- msg
 								fmt.Println("Got message on topic ", topic, msg.Value)
-							case <-commandsChannel:
-								return
+							case cmd := <-commandsChannel:
+								if cmd.CommandType == STOP {
+									return
+								}
 							}
 						}
-					}(topic, consumer)
+					}(topic, consumer, curCommandChannel)
+				}
+			}
+			cmd := <-commandChannel
+			if cmd.CommandType == RELOAD_TOPICS {
+				reloadData := cmd.Data.(ReloadTopicsData)
+				topics, master = reloadData.topics, reloadData.consumer
+				for _, subCommandChannel := range subCommandsChannels {
+					subCommandChannel <- Command{CommandType: STOP}
+				}
+				continue
+			} else if cmd.CommandType == STOP {
+				for _, subCommandChannel := range subCommandsChannels {
+					subCommandChannel <- Command{CommandType: STOP}
 				}
 			}
 		}
 	}()
 
-	return consumers, errors
+	return consumers, commandChannel, errors
 }
 
-func GetMessagesChannel(kafkaServers []string, topics []string, kafkaConfig *sarama.Config) (chan int, error) {
-	commandsChannel := make(chan int)
-	subCommandsChannel := make(chan int)
+func GetMessagesChannel(kafkaServers []string, topics []string, kafkaConfig *sarama.Config) (chan Command, error) {
+	commandsChannel := make(chan Command)
 	consumer, err := sarama.NewConsumer(kafkaServers, kafkaConfig)
 	if err != nil {
 		return nil, err
 	}
-
+	defer consumer.Close()
 	producer, err := sarama.NewSyncProducer(kafkaServers, kafkaConfig)
 	if err != nil {
 		return nil, err
 	}
+	defer producer.Close()
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt)
 
-	consumedMessages, errors := consume(topics, consumer, subCommandsChannel)
+	consumedMessages, subCommandChannel, errors := consume(topics, consumer)
 
 	go func() {
 		for {
@@ -90,9 +133,28 @@ func GetMessagesChannel(kafkaServers []string, topics []string, kafkaConfig *sar
 				}
 			case errorMsg := <-errors:
 				fmt.Println("Received error", errorMsg)
-			case <-commandsChannel:
-				consumer.Close()
-				subCommandsChannel <- 0
+			case cmd := <-commandsChannel:
+				if cmd.CommandType == RELOAD_KAFKA_CONFIG {
+					data := cmd.Data.(ReloadKafkaConfigData)
+					producer.Close()
+					producer, err = sarama.NewSyncProducer(data.kafkaServers, data.kafkaConfig)
+					if err != nil {
+						panic(err)
+					}
+					consumer.Close()
+					consumer, err = sarama.NewConsumer(kafkaServers, kafkaConfig)
+					if err != nil {
+						panic(err)
+					}
+					topics = data.topics
+					subCommandChannel <- Command{CommandType: RELOAD_TOPICS, Data: topics}
+				} else if cmd.CommandType == STOP {
+					subCommandChannel <- Command{CommandType: STOP}
+					producer.Close()
+					consumer.Close()
+				} else {
+					panic(cmd)
+				}
 			}
 		}
 	}()
