@@ -26,7 +26,7 @@ type Command struct {
 
 type ReloadTopicsData struct {
 	topics   []string
-	consumer *sarama.Consumer
+	consumer sarama.Consumer
 }
 
 type ReloadKafkaConfigData struct {
