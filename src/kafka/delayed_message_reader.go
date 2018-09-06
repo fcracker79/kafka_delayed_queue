@@ -103,6 +103,7 @@ func GetMessagesChannel(kafkaServers []string, topics []string, kafkaConfig *sar
 	defer consumer.Close()
 	producer, err := sarama.NewSyncProducer(kafkaServers, kafkaConfig)
 	if err != nil {
+		fmt.Printf("NewSyncProducerError %s", err)
 		return nil, err
 	}
 	defer producer.Close()
@@ -117,6 +118,7 @@ func GetMessagesChannel(kafkaServers []string, topics []string, kafkaConfig *sar
 			case msg := <-consumedMessages:
 				messageJsonData := make(map[string]interface{})
 				if err := json.Unmarshal(msg.Value, &messageJsonData); err != nil {
+					fmt.Printf("Could not deserialize message %s", err)
 					continue
 				}
 				if messageJsonData["expiration"].(int64) > time.Now().Unix() {
