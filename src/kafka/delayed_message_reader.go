@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/Shopify/sarama"
+	"github.com/bsm/sarama-cluster"
 	"os"
 	"os/signal"
 	"strings"
@@ -26,7 +27,7 @@ type Command struct {
 
 type ReloadTopicsData struct {
 	topics   []string
-	consumer sarama.Consumer
+	consumer *cluster.Consumer
 }
 
 type ReloadKafkaConfigData struct {
@@ -35,9 +36,9 @@ type ReloadKafkaConfigData struct {
 	kafkaConfig  *sarama.Config
 }
 
-func consume(topics []string, master sarama.Consumer) (chan *sarama.ConsumerMessage, chan Command, chan *sarama.ConsumerError) {
+func consume(topics []string, master *cluster.Consumer) (chan *sarama.ConsumerMessage, chan Command, chan error) {
 	consumers := make(chan *sarama.ConsumerMessage)
-	errors := make(chan *sarama.ConsumerError)
+	errors := make(chan error)
 	subCommandsChannels := make([]chan Command, 1)
 	commandChannel := make(chan Command)
 
@@ -47,33 +48,32 @@ func consume(topics []string, master sarama.Consumer) (chan *sarama.ConsumerMess
 				if strings.Contains(topic, "__consumer_offsets") {
 					continue
 				}
-				partitions, _ := master.Partitions(topic)
-				for partition := range partitions {
-					consumer, err := master.ConsumePartition(topic, int32(partition), sarama.OffsetNewest)
-					if nil != err {
-						fmt.Printf("Topic %v Partitions: %v", topic, partitions)
-						panic(err)
-					}
-					fmt.Println(" Start consuming topic ", topic)
-					curCommandChannel := make(chan Command)
-					subCommandsChannels = append(subCommandsChannels, curCommandChannel)
-					go func(topic string, consumer sarama.PartitionConsumer, commandsChannel chan Command) {
-						for {
-							select {
-							case consumerError := <-consumer.Errors():
-								errors <- consumerError
-								fmt.Println("consumerError: ", consumerError.Err)
-							case msg := <-consumer.Messages():
-								consumers <- msg
-								fmt.Println("Got message on topic ", topic, msg.Value)
-							case cmd := <-commandsChannel:
-								if cmd.CommandType == STOP {
-									return
-								}
+				fmt.Println(" Start consuming topic ", topic)
+				curCommandChannel := make(chan Command)
+				subCommandsChannels = append(subCommandsChannels, curCommandChannel)
+				fmt.Println("Consuming from topic %s", topic)
+				go func(topic string, consumer *cluster.Consumer, commandsChannel chan Command) {
+					errorsChannel := consumer.Errors()
+					messagesChannel := consumer.Messages()
+					for {
+						fmt.Println("Dino!!!")
+						select {
+						case consumerError := <-errorsChannel:
+							fmt.Println("ERROR", consumerError)
+							errors <- consumerError
+							fmt.Println("consumerError: ", consumerError)
+						case msg := <-messagesChannel:
+							fmt.Println("MESSAGE", msg)
+							consumers <- msg
+							fmt.Println("Got message on topic ", topic, msg.Value)
+						case cmd := <-commandsChannel:
+							if cmd.CommandType == STOP {
+								fmt.Println("STOP")
+								return
 							}
 						}
-					}(topic, consumer, curCommandChannel)
-				}
+					}
+				}(topic, master, curCommandChannel)
 			}
 			cmd := <-commandChannel
 			if cmd.CommandType == RELOAD_TOPICS {
@@ -94,19 +94,20 @@ func consume(topics []string, master sarama.Consumer) (chan *sarama.ConsumerMess
 	return consumers, commandChannel, errors
 }
 
-func GetMessagesChannel(kafkaServers []string, topics []string, kafkaConfig *sarama.Config) (chan Command, error) {
+func GetMessagesChannel(
+	kafkaServers []string, groupID string, topics []string,
+	kafkaConsumerConfig *cluster.Config,
+	kafkaProducerConfig *sarama.Config) (chan Command, error) {
 	commandsChannel := make(chan Command)
-	consumer, err := sarama.NewConsumer(kafkaServers, kafkaConfig)
+	consumer, err := cluster.NewConsumer(kafkaServers, groupID, topics, kafkaConsumerConfig)
 	if err != nil {
 		return nil, err
 	}
-	defer consumer.Close()
-	producer, err := sarama.NewSyncProducer(kafkaServers, kafkaConfig)
+	producer, err := sarama.NewSyncProducer(kafkaServers, kafkaProducerConfig)
 	if err != nil {
 		fmt.Printf("NewSyncProducerError %s", err)
 		return nil, err
 	}
-	defer producer.Close()
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt)
 
@@ -116,6 +117,7 @@ func GetMessagesChannel(kafkaServers []string, topics []string, kafkaConfig *sar
 		for {
 			select {
 			case msg := <-consumedMessages:
+				fmt.Println("Got one message")
 				messageJsonData := make(map[string]interface{})
 				if err := json.Unmarshal(msg.Value, &messageJsonData); err != nil {
 					fmt.Printf("Could not deserialize message %s", err)
@@ -144,7 +146,7 @@ func GetMessagesChannel(kafkaServers []string, topics []string, kafkaConfig *sar
 						panic(err)
 					}
 					consumer.Close()
-					consumer, err = sarama.NewConsumer(kafkaServers, kafkaConfig)
+					consumer, err = cluster.NewConsumer(kafkaServers, groupID, topics, kafkaConsumerConfig)
 					if err != nil {
 						panic(err)
 					}

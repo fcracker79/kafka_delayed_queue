@@ -49,7 +49,7 @@ func CreateBootstrapServersChannel(zookeeper Zookeeper) chan []string {
 					channel <- currentBootstrapServers
 				}
 			}
-			time.Sleep(time.Second * 30)
+			<-time.After(time.Second * 30)
 		}
 	}()
 	return channel

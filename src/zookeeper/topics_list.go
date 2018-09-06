@@ -1,7 +1,9 @@
 package zookeeper
 
 import (
+	"fmt"
 	"github.com/samuel/go-zookeeper/zk"
+	"sort"
 	"time"
 	"utils"
 )
@@ -27,6 +29,7 @@ func ListTopics(zookeeper Zookeeper, filter TopicFilter) ([]string, error) {
 		}
 	}
 
+	sort.Strings(filteredTopics)
 	return filteredTopics, nil
 }
 
@@ -38,11 +41,13 @@ func CreateChannelListTopics(zookeeper Zookeeper, filter TopicFilter) chan []str
 			currentTopics, err := ListTopics(zookeeper, filter)
 			if err == nil {
 				if !util.StringArrayEqual(topics, currentTopics) {
+					fmt.Println("TODO 1 got", currentTopics, "different from ", topics)
 					topics = currentTopics
+
 					channel <- currentTopics
 				}
 			}
-			time.Sleep(time.Second * 30)
+			<-time.After(time.Second * 30)
 		}
 	}()
 	return channel
