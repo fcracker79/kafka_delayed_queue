@@ -41,7 +41,7 @@ func StartReactor(zookeeperServers []string, clientID string, consumerGroup stri
 		kafkaConsumerConfig.ClientID = clientID
 		kafkaConsumerConfig.Admin.Timeout = time.Second * 30
 		kafkaConsumerConfig.Version = sarama.V1_0_0_0
-
+		kafkaConsumerConfig.Consumer.Offsets.Initial = sarama.OffsetOldest
 		fmt.Println("Kafka servers:", kafkaServers)
 		foundKafkaServers = len(kafkaServers) > 0
 		topics = <-topicsChannel

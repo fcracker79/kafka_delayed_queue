@@ -123,6 +123,10 @@ func GetMessagesChannel(
 					fmt.Printf("Could not deserialize message %s", err)
 					continue
 				}
+				if messageJsonData["expiration"] == nil {
+					consumer.CommitOffsets()
+					continue
+				}
 				if messageJsonData["expiration"].(int64) > time.Now().Unix() {
 					producer.SendMessage(&sarama.ProducerMessage{
 						Key:   sarama.ByteEncoder(msg.Key),
@@ -135,6 +139,7 @@ func GetMessagesChannel(
 						Key:   sarama.ByteEncoder(origKey),
 						Value: sarama.ByteEncoder(origValue), Topic: origTopic})
 				}
+				consumer.CommitOffsets()
 			case errorMsg := <-errors:
 				fmt.Println("Received error", errorMsg)
 			case cmd := <-commandsChannel:
